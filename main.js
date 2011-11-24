@@ -8,40 +8,45 @@
  * (which means that they are executed later, possibly in the background),
  * and their result is available only at a later stage.
  *
- * To create an agent, use `Agent.light` or `Agent.heavy`.
+ * You probably should not call this constructor. To create an agent, use `Agent.light`
+ * or `Agent.heavy`.
+ *
+ * @constructor
  */
 function Agent() {
-    this.send = {}
 }
 Agent.prototype = {
     send: null,	//A record of methods that communicate with the implementation of
                 //the agent and return `Future`s
-    fail: null,
 
     /**
-     * Implementation of `fail` for lighweight agents
+     * Stop this agent.
+     *
+     * No further message may be sent to the agent.
      */
-    _failLight: function(aReason) {
-	this.send = null;//Remove the ability to send messages + permit garbage-collection
-	if(this.onfail) {
-	    this.onfail.call(this, aReason);
-	}
+    fail:    function() {
+	throw new Error("This method is implemented by my subclasses");
     },
-
-    /**
-     * Implementation of `fail` for heavyweight agents
-     */
-    _failHeavy: function(aReason) {
-	this._futures = null;
-	this._counter = -1;
-	this._worker.terminate();
-	this._failLight(aReason);
-    },
-
     onreply: null,//Replace this with a function to be informed of all replies
     onresult:null,//Replace this with a function to be informed of all successes
     onerror: null,//Replace this with a function to be informed of all exceptions
     onfail:  null,//Replace this with a function to be informed of all failures
+}
+
+/**
+ * Create a heavyweight agent.
+ *
+ * All operations on a heavyweight agent are executed asynchronously
+ * in its own thread. Using heavyweight agents is good for improving
+ * speed of the application if your agents perform heavy computations.
+ * Note that communications with a heavyweight agent are relatively
+ * slow.
+ *
+ * @param {Object} aCode An object with the source of the agent.
+ * @return {Agent} The resulting agent.
+ */
+Agent.heavy = function(aCode) {
+    return new HeavyAgent(aCode);
 }
 
 /**
@@ -61,42 +66,7 @@ Agent.prototype = {
  * @return {Agent} The resulting agent.
  */
 Agent.light = function(aCode, aStrictness) {
-    const strict = (aStrictness === undefined)?this.strict:aStrictness;
-    if(strict) {//Enforce pass-by-source
-	aCode = eval(aCode.toSource());
-    }
-    var agent = new Agent();
-    agent.fail = agent._failLight;
-    for each(key in Object.keys(aCode)) {
-	const k = key;
-	result.send[k] = function() {
-	    var replier = new Future(agent);
-	    var args;
-	    if(strict) {//Enforce pass-by-source
-		args = [];
-		for(let i = 0; i < arguments.length; ++i) {
-		    args[i] = eval(arguments[i].toSource());
-		}
-	    } else {
-		args = arguments;
-	    }
-	    setTimeout(function() {
-		try {
-		    var result = aCode[k].call(aCode, args);
-		    if(strict) {
-			result = eval(result.toSource());
-		    }
-		    replier.result = result;
-		} catch(ex) {
-		    if(strict)
-			replier.error  = eval(ex.toSource());
-		    else
-			replier.error  = ex;
-		}
-	    }, 0);
-	}
-    }
-    return agent;
+    return new LightAgent(agent, aStrictness);
 }
 
 /**
@@ -108,60 +78,11 @@ Agent.light = function(aCode, aStrictness) {
  */
 Agent.strict = true;
 
-/**
- * Create a heavyweight agent.
- *
- * All operations on a heavyweight agent are executed asynchronously
- * in its own thread. Using heavyweight agents is good for improving
- * speed of the application if your agents perform heavy computations.
- * Note that communications with a heavyweight agent are relatively
- * slow.
- *
- * @param {Object} aCode An object with the source of the agent.
- * @return {Agent} The resulting agent.
- */
-Agent.heavy = function(aCode) {
-    var init    = aCode.toSource();
-    var agent   = new Agent();
-    agent.fail  = agent._failHeavy;
-    agent._worker= new Worker("worker.js");
-    agent._worker.postMessage(init);
-
-    //On this side, we have to handle a message queue
-    agent._futures = {};
-    agent._counter = 0;
-    agent._worker.onmessage = function(aReply) {
-	var future = agent._futures[aReply.id];
-	future.reply = aReply;
-	delete agent._futures[aReply.id];
-    }
-
-    for each(key in Object.keys(aCode)) {
-	const k = key;
-	result.send[k] = function() {
-	    const id = agent._counter++;
-            agent._futures[counter] = new Future(agent);
-	    agent._worker.postMessage({key: k,
-		   		       id:  id,
-			               args: arguments});
-	}
-    }
-    return agent;
-    
-}
-
-/**
- * Return a new object similar to |Agent|, but with
- * its own main thread
- */
-Agent.group = function() {
-    //TODO: Can this even be implemented?
-}
 
 /**
  * The promise of a future result.
  *
- * You should not need to call the constructor directly.
+ * You probably do not need to call the constructor directly.
  */
 function Future(aAgent) {
     this._result  = {value: this.NOT_READY, ready:false};
@@ -341,3 +262,113 @@ Future.prototype = {
      */
     NOT_READY: {}
 }
+
+
+
+
+////////////////////////////////// Internal stuff, you should not need it
+
+/**
+ * A subclass of Agent for agents executed in their own thread
+ */
+function HeavyAgent(aCode) {
+    this.send     = {};
+    this._futures = {};
+    this._counter = 0;
+
+    const init     = aCode.toSource();
+    const self     = this;
+    const worker   = new Worker("worker.js");
+    this._worker   = worker;
+    this._worker.postMessage(init);
+    worker.onmessage = function(aReply) {
+	var future = self._futures[aReply.id];
+	future.reply = aReply;
+	delete self._futures[aReply.id];
+    }
+
+    for each(key in Object.keys(aCode)) {
+	const k = key;
+	result.send[k] = function() {
+	    const id = self._counter++;
+            self._futures[counter] = new Future(self);
+	    worker.postMessage({key:  k,
+		   		id:   id,
+			        args: arguments});
+	}
+    }
+}
+HeavyAgent.prototype = new Agent();
+HeavyAgent.prototype.fail = function(aReason) {
+    this._futures = null;
+    this._counter = -1;
+    this._worker.terminate();
+    this.send     = null;
+    if(this.onfail) {
+	this.onfail.call(aReason);
+    }
+}
+HeavyAgent.prototype._futures = null;
+HeavyAgent.prototype._counter = 0;
+
+/**
+ * A subclass of Agent for agents executed in the main thread
+ */
+function LightAgent() {
+    this.send = {}
+    const strict = (aStrictness === undefined)?this.strict:aStrictness;
+    if(strict) {//Enforce pass-by-source
+	aCode = eval(aCode.toSource());
+    }
+
+    const self = this;
+    self.fail = self._failLight;
+    for each(key in Object.keys(aCode)) {
+	const k = key;
+	result.send[k] = function() {
+	    var replier = new Future(self);
+	    var args;
+	    if(strict) {//Enforce pass-by-source
+		args = [];
+		for(let i = 0; i < arguments.length; ++i) {
+		    args[i] = eval(arguments[i].toSource());
+		}
+	    } else {
+		args = arguments;
+	    }
+	    setTimeout(function() {
+		try {
+		    var result = aCode[k].call(aCode, args);
+		    if(strict) {
+			result = eval(result.toSource());
+		    }
+		    replier.result = result;
+		} catch(ex) {
+		    if(strict)
+			replier.error  = eval(ex.toSource());
+		    else
+			replier.error  = ex;
+		}
+	    }, 0);
+	}
+    }
+}
+LightAgent.prototype = new Agent();
+LightAgent.prototype.fail = function(aReason) {
+    this.send = null;
+    if(this.onfail) {
+	this.onfail.call(aReason);
+    }
+}
+
+
+
+
+/**
+ * Return a new object similar to |Agent|, but with
+ * its own main thread
+ */
+Agent.group = function() {
+    //TODO: Can this even be implemented?
+}
+
