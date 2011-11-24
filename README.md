@@ -40,11 +40,15 @@ To handle the reply, simply attach a property `onreply` to your future:
 
     myFuture.onreply = function(aReply) {
        if(aReply.success) {
-          alert("Success! :" + aReply.success);
+          alert("Success :" + aReply.success);
        } else {
-          alert("Error: !" + aReply.error);
+          alert("Error: " + aReply.error);
        }
     }
+
+This should display
+
+    Success: 2
 
 This is it, you now know how to use an agent!
 
@@ -54,3 +58,53 @@ XMLHttpRequest or any other non-transferable object. Its methods
 can, however, make use of closures, XMLHttpRequest, etc.
 
 [2] A corresponding `Agent.heavy` is at work.
+
+The API
+=======
+
+Sending messages
+----------------
+
+Creating an agent `myAgent` from an object `myObject` yields an agent
+that can send messages to (a copy of) `myObject`. For each method in
+`myObject`, `myAgent` can send a message with the same name and the
+same list of arguments.
+
+To send a message corresponding to `myObj.foo(a, b, c)`, use
+`myAgent.send.foo(a, b, c)`.
+
+Sending a message always produces a `Future`.
+
+Watching the Future
+-------------------
+
+To watch a Future, you may set its fields
+
+- `onreply`  (to be informed once computation is complete)
+- `onresult` (to be informed only in case of success)
+- `onerror`  (to be informed only in case of error)
+
+Once the reply is available, you may also read the following fields
+
+- `result`
+- `error`
+
+Reading these fields before the reply is available is meaningless.
+
+Watching the Agent
+------------------
+
+Instead of watching a Future, it is possible to watch the Agent itself.
+This is important essentially to handle errors and failures, but all
+replies can be observed, by setting the following fields:
+
+- `onreply`  (to be informed every time a computation is complete)
+- `onresult` (to be informed every time a computation ends in success)
+- `onerror`  (to be informed every time a computation ends in error)
+- `onfail`   (to be informed if the agent itself fails)
+
+Failures
+--------
+
+To stop an agent, _fail_ it by calling its method `fail`. To be informed of
+agent failures, watch `onfail`, as above.
