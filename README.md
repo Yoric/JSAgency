@@ -23,8 +23,8 @@ To create an agent, any simple object [1] will do. For instance
       }
     }
 
-Transform the agent into an object by passing it to `Agent.light`
-[2], as follows:
+Transform the agent into an object by passing it to `Agent.light`,
+as follows:
 
     var myAgent = Agent.light(myObject)
 
@@ -57,10 +57,17 @@ This is it, you now know how to use an agent!
 XMLHttpRequest or any other non-transferable object. Its methods
 can, however, make use of closures, XMLHttpRequest, etc.
 
-[2] A corresponding `Agent.heavy` is at work.
-
 The API
 =======
+
+Creating an agent
+-----------------
+
+To create an agent from an object, use one of the following cuntions:
+- `Agent.light` (to create an agent executed in the same thread)
+- `Agent.heavy` (to create an agent executed in its own thread)
+
+The API is identical.
 
 Sending messages
 ----------------
@@ -108,3 +115,9 @@ Failures
 
 To stop an agent, _fail_ it by calling its method `fail`. To be informed of
 agent failures, watch `onfail`, as above.
+
+
+In progress
+===========
+
+This work is currently untested.

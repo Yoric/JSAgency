@@ -1,14 +1,43 @@
+/**
+ * An agent.
+ *
+ * Agents are a specific kind object that implement messages and futures
+ * instead of methods and results. Where usual method calls are synchronous
+ * (which means that it is executed immediately, blocking the rest
+ * of the computation until it is done), agent calls are asynchronous
+ * (which means that they are executed later, possibly in the background),
+ * and their result is available only at a later stage.
+ *
+ * To create an agent, use `Agent.light` or `Agent.heavy`.
+ */
 function Agent() {
     this.send = {}
 }
 Agent.prototype = {
-    send: null,	//a map map of functions returning a receiver
-    fail: function(aReason) {
+    send: null,	//A record of methods that communicate with the implementation of
+                //the agent and return `Future`s
+    fail: null,
+
+    /**
+     * Implementation of `fail` for lighweight agents
+     */
+    _failLight: function(aReason) {
 	this.send = null;//Remove the ability to send messages + permit garbage-collection
 	if(this.onfail) {
 	    this.onfail.call(this, aReason);
 	}
     },
+
+    /**
+     * Implementation of `fail` for heavyweight agents
+     */
+    _failHeavy: function(aReason) {
+	this._futures = null;
+	this._counter = -1;
+	this._worker.terminate();
+	this._failLight(aReason);
+    },
+
     onreply: null,//Replace this with a function to be informed of all replies
     onresult:null,//Replace this with a function to be informed of all successes
     onerror: null,//Replace this with a function to be informed of all exceptions
@@ -36,11 +65,12 @@ Agent.light = function(aCode, aStrictness) {
     if(strict) {//Enforce pass-by-source
 	aCode = eval(aCode.toSource());
     }
-    var communicator = new Agent();
+    var agent = new Agent();
+    agent.fail = agent._failLight;
     for each(key in Object.keys(aCode)) {
 	const k = key;
 	result.send[k] = function() {
-	    var replier = new Future(communicator);
+	    var replier = new Future(agent);
 	    var args;
 	    if(strict) {//Enforce pass-by-source
 		args = [];
@@ -52,14 +82,21 @@ Agent.light = function(aCode, aStrictness) {
 	    }
 	    setTimeout(function() {
 		try {
-		    replier.result = aCode[k].call(aCode, args);
+		    var result = aCode[k].call(aCode, args);
+		    if(strict) {
+			result = eval(result.toSource());
+		    }
+		    replier.result = result;
 		} catch(ex) {
-		    replier.error  = ex;
+		    if(strict)
+			replier.error  = eval(ex.toSource());
+		    else
+			replier.error  = ex;
 		}
 	    }, 0);
 	}
     }
-    return communicator;
+    return agent;
 }
 
 /**
@@ -84,7 +121,33 @@ Agent.strict = true;
  * @return {Agent} The resulting agent.
  */
 Agent.heavy = function(aCode) {
-    //TODO:
+    var init    = aCode.toSource();
+    var agent   = new Agent();
+    agent.fail  = agent._failHeavy;
+    agent._worker= new Worker("worker.js");
+    agent._worker.postMessage(init);
+
+    //On this side, we have to handle a message queue
+    agent._futures = {};
+    agent._counter = 0;
+    agent._worker.onmessage = function(aReply) {
+	var future = agent._futures[aReply.id];
+	future.reply = aReply;
+	delete agent._futures[aReply.id];
+    }
+
+    for each(key in Object.keys(aCode)) {
+	const k = key;
+	result.send[k] = function() {
+	    const id = agent._counter++;
+            agent._futures[counter] = new Future(agent);
+	    agent._worker.postMessage({key: k,
+		   		       id:  id,
+			               args: arguments});
+	}
+    }
+    return agent;
+    
 }
 
 /**
@@ -239,6 +302,16 @@ Future.prototype = {
     },
     get error() {
 	return this._error.value;
+    },
+
+    set reply(aValue) {
+	if(aValue.result) {
+	    this.result = aValue.result;
+	} else if (aValue.error) {
+	    this.error  = aValue.error;
+	} else {
+	    throw new Error(aValue);
+	}
     },
 
     /**
