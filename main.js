@@ -1,59 +1,7 @@
-Agents = {
-    /**
-     * Create a lightweight agent, executed in the same thread.
-     *
-     * @param {Object} aCode An object with the source of the agent.
-     * @return {Communicator} A communication object for aCode
-     */
-    light: function(aCode) {
-	if(this.strict) {//Enforce pass-by-source
-	    aCode = eval(aCode.toSource());
-	}
-	var communicator = new Communicator();
-	for each(key in Object.keys(aCode)) {
-	    const k = key;
-	    result.send[k] = function() {
-		var replier = new Future(communicator);
-		var args    = arguments;
-		setTimeout(function() {
-		    try {
-			replier.result = aCode[k].call(aCode, args);
-		    } catch(ex) {
-			replier.error  = ex;
-		    }
-		}, 0);
-	    }
-	}
-	return communicator;
-    },
-    /**
-     * Create a heavyweight agent, executed in its own worker
-     *
-     * @return {Communicator} A communication object
-     */
-    heavy: function(aCode) {
-	//TODO
-    },
-
-    /**
-     * Create a heavyweight agent shared by several lightweight agents
-     *
-     * @return {Array.<Communicator>} A communication object
-     */
-    heavyCombo: function(aCode) {
-	//TODO
-    },
-
-    /**
-     * If true, |light| enforces pass-by-code even for lightweight agents
-     */
-    strict: true
-}
-
-function Communicator() {
+function Agent() {
     this.send = {}
 }
-Communicator.prototype = {
+Agent.prototype = {
     send: null,	//a map map of functions returning a receiver
     fail: function(aReason) {
 	this.send = null;//Remove the ability to send messages + permit garbage-collection
@@ -67,33 +15,179 @@ Communicator.prototype = {
     onfail:  null,//Replace this with a function to be informed of all failures
 }
 
-function Future(aCommunicator) {
-    this._result  = {value: this.NOT_READY};
-    this._error   = {value: this.NOT_READY};
-    this._manager = aCommunicator;
+/**
+ * Create a lightweight agent.
+ *
+ * All operations on a lightweight agent are executed asynchronously
+ * in the main thread. Using lightweight agents is good for improving
+ * reactivity but will the performance of the application.
+ *
+ * @param {Object} aCode An object with the source of the agent.
+ * @param {bool?} aStrictness If |true|, all messages and results are passed by
+ * source, enforcing the same behavior as with heavyweight agents. If |false|,
+ * all messages and results are passed by reference, which is faster but does
+ * not enforce separation of agents. If omitted, uses the behavior specified
+ * by |Agent.strict|.
+ *
+ * @return {Agent} The resulting agent.
+ */
+Agent.light = function(aCode, aStrictness) {
+    const strict = (aStrictness === undefined)?this.strict:aStrictness;
+    if(strict) {//Enforce pass-by-source
+	aCode = eval(aCode.toSource());
+    }
+    var communicator = new Agent();
+    for each(key in Object.keys(aCode)) {
+	const k = key;
+	result.send[k] = function() {
+	    var replier = new Future(communicator);
+	    var args;
+	    if(strict) {//Enforce pass-by-source
+		args = [];
+		for(let i = 0; i < arguments.length; ++i) {
+		    args[i] = eval(arguments[i].toSource());
+		}
+	    } else {
+		args = arguments;
+	    }
+	    setTimeout(function() {
+		try {
+		    replier.result = aCode[k].call(aCode, args);
+		} catch(ex) {
+		    replier.error  = ex;
+		}
+	    }, 0);
+	}
+    }
+    return communicator;
 }
+
+/**
+ * If |true|, all messages and results to/from lightweight agents are passed by
+ * source, enforcing the same behavior as with heavyweight agents. If |false|,
+ * all messages and results are passed by reference, which is faster but does
+ * not enforce separation of agents. This can be overridden on a per-agent
+ * basis as an argument to |Agent.light|.
+ */
+Agent.strict = true;
+
+/**
+ * Create a heavyweight agent.
+ *
+ * All operations on a heavyweight agent are executed asynchronously
+ * in its own thread. Using heavyweight agents is good for improving
+ * speed of the application if your agents perform heavy computations.
+ * Note that communications with a heavyweight agent are relatively
+ * slow.
+ *
+ * @param {Object} aCode An object with the source of the agent.
+ * @return {Agent} The resulting agent.
+ */
+Agent.heavy = function(aCode) {
+    //TODO:
+}
+
+/**
+ * Return a new object similar to |Agent|, but with
+ * its own main thread
+ */
+Agent.group = function() {
+    //TODO: Can this even be implemented?
+}
+
+/**
+ * The promise of a future result.
+ *
+ * You should not need to call the constructor directly.
+ */
+function Future(aAgent) {
+    this._result  = {value: this.NOT_READY, ready:false};
+    this._error   = {value: this.NOT_READY, ready:false};
+    this._manager = aAgent;
+}
+
 Future.prototype = {
     /**
      * A result handler
      *
      * If set, it will be called whenever the call is complete and a
-     * result is vailable, with the result as argument.
+     * result is vailable, with the result as argument. If the result
+     * is already available, the handler is triggered immediately.
      *
      * @type {(function(*):* | null)}
      */
-    onresult: null,
+    get onresult() {
+	return this._onresult;
+    },
+    set onresult(aCallback) {
+	//Trigger the callback immediately if the result is already available
+	if(this._result.ready) {
+	    var self;
+	    setTimeout(function() {
+		aCallback.call(self, self._result.value);
+	    })
+	}
+	this._onresult = aCallback;
+    },
+    _onresult: null,
 
     /**
      * An error handler
      *
      * If set, it will be called whenever the call is complete and a
-     * result is vailable, with the error as argument.
+     * error is vailable, with the result as argument. If the error
+     * is already available, the handler is triggered immediately.
      *
      * @type {(function(Error):* | null)}
      */
-    onerror:  null,
+    get onerror() {
+	return this._onerror;
+    },
+    set onerror(aCallback) {
+	//Trigger the callback immediately if the error is already available
+	if(this._error.ready) {
+	    var self;
+	    setTimeout(function() {
+		aCallback.call(self, self._error.value);
+	    })
+	}
+	this._onerror = aCallback;
+    },
+    _onerror: null,
 
-    onreply:  null,
+    /**
+     * A reply handler
+     *
+     * If set, it will be called whenever the call is complete, whether
+     * it results in a success or an error. If the result/error
+     * is already available, the handler is triggered immediately.
+     *
+     * To distinguish between a success and an error, the handler is
+     * passed as argument either an object |{result: result}| or an
+     * object |{error: error}|.
+     *
+     * @type {(function(Error):* | null)}
+     */
+    get onreply() {
+	return this._onreply;
+    },
+    set onreply(aCallback) {
+	//Trigger the callback immediately if the reply is already available
+	var reply;
+	if(this._result.ready) {
+	    reply = {result: this._result.value}
+	} else if(this._error.ready) {
+	    reply = {error:  this._error.value}
+	}
+	if(reply) {
+	    var self;
+	    setTimeout(function() {
+		aCallback.call(self, reply);
+	    })
+	}
+	this._onreply = aCallback;
+    },
+    _onreply: null,
 
     /**
      * Set the result, trigger the listeners.
@@ -164,7 +258,7 @@ Future.prototype = {
     /**
      * The manager.
      *
-     * @type {Communicator|null}
+     * @type {Agent|null}
      */
     _manager: null,
 
