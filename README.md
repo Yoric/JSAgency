@@ -17,34 +17,34 @@ Example
 
 To create an agent, any simple object [1] will do. For instance
 
-   var myObject = {
-     division: function(aNumerator, aDivider) {
-       return aNumerator / aDivider;
-     }
-   }
+    var myObject = {
+      division: function(aNumerator, aDivider) {
+        return aNumerator / aDivider;
+      }
+    }
 
 Transform the agent into an object by passing it to `Agent.light`
 [2], as follows:
 
-   var myAgent = Agent.light(myObject)
+    var myAgent = Agent.light(myObject)
 
 You now have an agent. By opposition to your usual objects, an
 agent receives messages and replies asynchronously with futures.
 To send message `division` to your agent, simply write
 
-   var myFuture = myAgent.send.division(10, 5);
+    var myFuture = myAgent.send.division(10, 5);
 
 This message will be sent asynchronously to the object, the object
 will perform the operation and reply whenever the result is available.
 To handle the reply, simply attach a property `onreply` to your future:
 
-   myFuture.onreply = function(aReply) {
-      if(aReply.success) {
-         alert("Success! :" + aReply.success);
-      } else {
-         alert("Error: !" + aReply.error);
-      }
-   }
+    myFuture.onreply = function(aReply) {
+       if(aReply.success) {
+          alert("Success! :" + aReply.success);
+       } else {
+          alert("Error: !" + aReply.error);
+       }
+    }
 
 This is it, you now know how to use an agent!
 
