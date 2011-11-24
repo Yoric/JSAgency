@@ -78,6 +78,23 @@ Agent.light = function(aCode, aStrictness) {
  */
 Agent.strict = true;
 
+/**
+ * Stop execution of the current agent, inform any listener
+ */
+Agent.fail = function(aReason) {
+    if(!Agent._currentAgent) {
+	throw new Error("Agent.fail: stopping a non-existing agent");
+    }
+    Agent._currentAgent.fail(aReason);
+}
+
+/**
+ * A pointer to the current agent.
+ *
+ * Used by Agent.fail.
+ * @type {Agent|null}
+ */
+Agent._currentAgent = null;
 
 /**
  * The promise of a future result.
@@ -282,6 +299,10 @@ function HeavyAgent(aCode) {
     this._worker   = worker;
     this._worker.postMessage(init);
     worker.onmessage = function(aReply) {
+	if(aReply.failure) {
+	    this.fail(aReply.failure);
+	    return;
+	} 
 	var future = self._futures[aReply.id];
 	future.reply = aReply;
 	delete self._futures[aReply.id];
@@ -314,9 +335,10 @@ HeavyAgent.prototype._counter = 0;
 /**
  * A subclass of Agent for agents executed in the main thread
  */
-function LightAgent() {
+function LightAgent(aCode, aStrictness) {
     this.send = {}
     const strict = (aStrictness === undefined)?this.strict:aStrictness;
+    this._strict = strict;
     if(strict) {//Enforce pass-by-source
 	aCode = eval(aCode.toSource());
     }
@@ -338,7 +360,9 @@ function LightAgent() {
 	    }
 	    setTimeout(function() {
 		try {
+		    Agent._currentAgent = self;
 		    var result = aCode[k].call(aCode, args);
+		    Agent._currentAgent = null;
 		    if(strict) {
 			result = eval(result.toSource());
 		    }
@@ -357,10 +381,13 @@ LightAgent.prototype = new Agent();
 LightAgent.prototype.fail = function(aReason) {
     this.send = null;
     if(this.onfail) {
+	if(this._strict) {
+	    aReason = eval(aReason.toSource());
+	}
 	this.onfail.call(aReason);
     }
 }
-
+LightAgent.prototype._strict = false;
 
 
 

@@ -120,4 +120,5 @@ agent failures, watch `onfail`, as above.
 In progress
 ===========
 
-This work is currently untested.
+- This work is currently untested.
+- For the moment, Heavy agents have no way of talking to each other.

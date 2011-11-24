@@ -1,7 +1,13 @@
 var object;
 
+importScripts("main.js");
+
+Agent.fail = function(aReason) {
+    self.postMessage({failure: aReason});
+}
+
 self.onmessage = function(aInitCode) {
-    var queue = []; //Handle messages that may have been received while initializing
+    var queue = []; //Record messages that may have been received while initializing
     self.onmessage = function(aWaitingInstruction) {
 	queue.push(aWaitingInstruction);
     }
@@ -13,14 +19,12 @@ self.onmessage = function(aInitCode) {
 	try {
 	    const result = object[key].call(object, args);
 	    self.postMessage({result: ex, id: id})
-	    //Note: we rely on the fact that we can only ever handle one message
-	    //at a time
 	} catch(ex) {
 	    self.postMessage({error: ex, id: id})
 	}
     }
     self.onmessage = handleMessage;
-    for each(msg in queue) {
+    for each(msg in queue) {//Handle waiting messages
 	handleMessage(msg);
     }
     queue = null;
