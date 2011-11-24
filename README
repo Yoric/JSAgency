@@ -1,0 +1,14 @@
+A simpler library for multi-agent computation in JavaScript
+
+
+
+JavaScript offers workers, but they are rather annoying to use.
+Dart offers essentially the same model, but with a nicer API.
+Erlang offers a more featureful model that also handles errors
+and failures. 
+
+The objective of this library is to offer an Erlang-style model
+of agents, with the simplicity of JavaScript, a nice API comparable
+to that of Dart and the power of web workers.
+
+Very much a work in progress.
